@@ -143,29 +143,25 @@ function rescue_columns($columns)
 	return $columns;
 }
 
-function my_custom_columns($column)
-{
-	global $post;
-	if($column == 'thumbnail')
-	{
-		echo get_the_post_thumbnail( $_post->ID, array(100,100) );
-	}
-	elseif($column == 'featured')
-	{
-		if(get_field('featured'))
-		{
-			echo 'Yes';
-		}
-		else
-		{
-			echo 'No';
-		}
-	}
-	elseif($column == 'status')
-	{
-		echo get_field('status');
-	}
+function my_custom_columns( $column ) {
+    global $post;
+
+    if ( $column === 'thumbnail' ) {
+        echo get_the_post_thumbnail( $post->ID, [100, 100] );
+        return;
+    }
+
+    if ( $column === 'featured' ) {
+        echo get_field( 'featured', $post->ID ) ? 'Yes' : 'No';
+        return;
+    }
+
+    if ( $column === 'status' ) {
+        echo get_field( 'status', $post->ID );
+        return;
+    }
 }
+
 
 add_action("manage_posts_custom_column", "my_custom_columns");
 add_filter("manage_edit-rescue-animals_columns", "rescue_columns");
@@ -292,3 +288,88 @@ add_shortcode( 'animal_list', 'animal_list_func' );
 
 
 
+/**
+ * Animal Grid Shortcode
+ *  [animal_list status="Available" happy_tail=0 per_page=100]
+ */
+
+add_shortcode( 'animal_grid', 'animal_grid_shortcode' );
+
+function animal_grid_shortcode( $atts ) {
+    return animal_grid($atts);
+}
+
+function animal_grid( $atts ) {
+
+    $atts = shortcode_atts([
+        'status'      => '',
+        'excluded'    => '',
+        'happy_tail'  => '0',
+        'per_page'    => '100',
+    ], $atts, 'animal_grid');
+
+    // Unique key for this parameter set
+    $cache_key = 'animal_grid_' . md5( serialize( $atts ) );
+
+    // Attempt to load cache
+    $cached = get_transient( $cache_key );
+    if ( $cached !== false ) {
+        return $cached;
+    }
+
+    // Build meta_query
+    $meta_query = ['relation' => 'AND'];
+
+    if ( $atts['status'] !== '' ) {
+        $meta_query[] = [
+            'key'     => 'status',
+            'value'   => $atts['status'],
+            'compare' => '='
+        ];
+    }
+
+    if ( $atts['happy_tail'] !== '' ) {
+        $meta_query[] = [
+            'key'     => 'happy_tail',
+            'value'   => $atts['happy_tail'],
+            'compare' => '='
+        ];
+    }
+
+    if ( $atts['excluded'] !== '' ) {
+        $meta_query[] = [
+            'key'     => 'status',
+            'value'   => explode(',', $atts['excluded']),
+            'compare' => 'NOT IN'
+        ];
+    }
+
+    $query = new WP_Query([
+        'post_type'               => 'rescue-animals',
+        'posts_per_page'          => (int) $atts['per_page'],
+        'orderby'                 => 'date',
+        'order'                   => 'DESC',
+        'meta_query'              => $meta_query,
+        'no_found_rows'           => true,
+        'update_post_meta_cache'  => false,
+        'update_post_term_cache'  => false,
+    ]);
+
+    $output = '<div class="animal-grid flex-row">';
+
+    if ( $query->have_posts() ) {
+        while ( $query->have_posts() ) {
+            $query->the_post();
+            $output .= \App\template('partials.content-animal');
+        }
+    }
+
+    wp_reset_postdata();
+
+    $output .= '</div>';
+
+    // Cache for 12 hours
+    set_transient( $cache_key, $output, 12 * HOUR_IN_SECONDS );
+
+    return $output;
+}
